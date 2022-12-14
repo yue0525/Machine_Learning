@@ -27,3 +27,4 @@ def kernel_k_means():
 
 if __name__ == "__main__":
     data1, data2 = load()
+    data1, data2 = load()
