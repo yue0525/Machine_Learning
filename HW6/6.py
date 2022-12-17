@@ -30,7 +30,7 @@ def kernel_k_means(data_Color, data_Spatial):
 
 
 def k_mean(Gram):
-    k = 2
+    k = 3
     # select k centers of random
     center = random.sample(range(0, 10000), k)
     center = np.array(center)
@@ -71,9 +71,9 @@ def k_mean(Gram):
             gif_pic = np.array(gif_pic)
             break
     
-    return gif_pic, count
+    return gif_pic, count,k
 
-def make_gif(gif_pic,data_size,count):
+def make_gif(gif_pic,data_size,count,k):
     images = []
     color = [(255,0,0),(0,255,0),(0,0,255),(255,255,0)] # r g b y
     width = data_size
@@ -81,16 +81,26 @@ def make_gif(gif_pic,data_size,count):
         images.append(Image.new('RGB', (width, width)))
         for x in range(width):
             for y in range(width):
-                images[i].putpixel((x,y),color[gif_pic[i][x * data_size + y][0]])
+                images[i].putpixel((x,y),color[gif_pic[i][x * width + y][0]])
 
-    images[0].save('kmeans.gif', format='GIF', append_images=images[1:], save_all=True, duration=100, loop=0)
+    images[0].save(f'kmeans_k-{k}.gif', format='GIF', append_images=images[1:], save_all=True, duration=100, loop=0)
+    images[count-1].save(f'kmeans_k-{k}.png')
+
     return
 
-if __name__ == "__main__":
-    data_Color, data_Spatial, data_size= load()
-    # print(data_size)
+if __name__ == "__main__":    
+    print("loading...")
+
+    data_Color, data_Spatial, data_size = load()
+
+    print("get kernel...")
+
     Gram = kernel_k_means(data_Color, data_Spatial)
 
-    gif_pic ,count= k_mean(Gram)
+    print("k-means...")
 
-    # make_gif(gif_pic,data_size,count)
+    gif_pic ,count ,k= k_mean(Gram)
+
+    print("making GIF...")
+
+    make_gif(gif_pic,data_size,count,k)
