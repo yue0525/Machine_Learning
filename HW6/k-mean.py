@@ -1,23 +1,19 @@
 import numpy as np
 import random
 from scipy.spatial.distance import cdist
-import matplotlib.image as mpimg
-import matplotlib.pyplot as plt
-from PIL import Image, ImageColor
-from PIL import Image, ImageDraw
-import os
-# import cv2
+from PIL import Image
 import copy
 
 
-def load():
-    img1 = Image.open("image1.png")
+def load(image_num):
+    str_image = f"image{image_num}.png"
+    img1 = Image.open(str_image)
     data = np.array(img1)
-    # print(data.shape) 
     data_size = data.shape[0]
     data_Color = data.reshape(-1, data.shape[2])
+    # print(data_Color.shape)
     data_Spatial = np.array([(i, j) for i in range(data.shape[0])for j in range(data.shape[1])])
-    # print(data_Spatial[0])
+    # print(data_Spatial.shape)
     return data_Color, data_Spatial, data_size
     
 
@@ -67,7 +63,8 @@ def k_mean(Gram,k_num,kmean_kmeanplusplus):
                 if i == (len(sum_p)-2) and random_pro > sum_p[i + 1]:
                     mean_num = i + 1
             mean[mean_id] = Gram[mean_num]
-        print(mean)
+        # print(mean)
+
     gif_pic = []
     count = 0
     while(True):
@@ -94,7 +91,7 @@ def k_mean(Gram,k_num,kmean_kmeanplusplus):
 
         # store the each cluster to gif_pic for making the .gif
         gif_pic.append(cluster)
-
+        
         if np.linalg.norm(mean - pre_mean) < 1e-5:
             print(count)
             gif_pic = np.array(gif_pic)
@@ -102,7 +99,7 @@ def k_mean(Gram,k_num,kmean_kmeanplusplus):
     
     return gif_pic, count
 
-def make_gif(gif_pic,data_size,count,k,kmean_kmeanplusplus):
+def make_gif(gif_pic,data_size,count,k,kmean_kmeanplusplus,image_num):
     mode = kmean_kmeanplusplus
     images = []
     color = [(255,0,0),(0,255,0),(0,0,255),(255,255,0)] # r g b y
@@ -111,22 +108,23 @@ def make_gif(gif_pic,data_size,count,k,kmean_kmeanplusplus):
         images.append(Image.new('RGB', (width, width)))
         for x in range(width):
             for y in range(width):
-                images[i].putpixel((x,y),color[gif_pic[i][x * width + y][0]])
+                images[i].putpixel((y,x),color[gif_pic[i][x * width + y][0]])
     if mode == 0:
-        images[0].save(f'kmeans_k-{k}.gif', format='GIF', append_images=images[1:], save_all=True, duration=100, loop=0)
-        images[count-1].save(f'kmeans_k-{k}.png')
+        images[0].save(f'./image{image_num}_k_mean_pic/kmeans_k-{k}.gif', format='GIF', append_images=images[1:], save_all=True, duration=100, loop=0)
+        images[count-1].save(f'./image{image_num}_k_mean_pic/kmeans_k-{k}.png')
     if mode == 1:
-        images[0].save(f'k-mean++_k-{k}.gif', format='GIF', append_images=images[1:], save_all=True, duration=100, loop=0)
-        images[count-1].save(f'k-mean++_k-{k}.png')
+        images[0].save(f'./image{image_num}_k_mean_pic/k-mean++_k-{k}.gif', format='GIF', append_images=images[1:], save_all=True, duration=100, loop=0)
+        images[count-1].save(f'./image{image_num}_k_mean_pic/k-mean++_k-{k}.png')
     return
+    
 
 if __name__ == "__main__":    
     k_num = int(input("k = "))
     kmean_kmeanplusplus = int(input("using k-mean(0) or k-mean++(1) : "))
-
+    image_num = int(input("which image (1) or (2) : "))
     print("loading...")
 
-    data_Color, data_Spatial, data_size = load()
+    data_Color, data_Spatial, data_size = load(image_num)
 
     print("get kernel...")
 
@@ -138,4 +136,4 @@ if __name__ == "__main__":
 
     print("making GIF...")
 
-    make_gif(gif_pic,data_size,count,k_num,kmean_kmeanplusplus)
+    make_gif(gif_pic,data_size,count,k_num,kmean_kmeanplusplus,image_num)
