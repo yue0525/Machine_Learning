@@ -29,16 +29,45 @@ def kernel_k_means(data_Color, data_Spatial):
     return gram
 
 
-def k_mean(Gram):
-    k = 3
-    # select k centers of random
-    center = random.sample(range(0, 10000), k)
-    center = np.array(center)
+def k_mean(Gram,k_num,kmean_kmeanplusplus):
+    k = k_num
+    mode = kmean_kmeanplusplus
     mean = np.zeros((k,Gram.shape[0]))
-    # set the center to the mean
-    for i in range(k):
-        mean[i] = Gram[center[i]]
+    # mode = 0 k-mean
+    if mode == 0:
+        # select k centers of random
+        center = random.sample(range(0, 10000), k)
+        center = np.array(center)   
+        # set the center to the mean
+        for i in range(k):
+            mean[i] = Gram[center[i]]
     # print(mean)
+    # mode = 1 k-mean++
+    if mode == 1:
+        random_num = random.sample(range(0, 10000),1)
+        mean[0] = Gram[random_num]
+        for mean_id in range(1,k):
+
+            dis = []
+            for i in range(Gram.shape[0]):
+                dis.append(np.linalg.norm(Gram[i] - mean[mean_id - 1]) ** 2)
+            dis_sum = np.sum(dis)
+            p_dis = []
+            for i in range(len(dis)):
+                p_dis.append(dis[i]/dis_sum)
+            sum_p = np.cumsum(p_dis)
+            random_pro = np.random.uniform(0,1)
+            mean_num = 0
+            for i in range(len(sum_p)-1):
+                if random_pro < sum_p[0]:
+                    break
+                elif random_pro > sum_p[i] and random_pro < sum_p[i + 1]:
+                    mean_num = i
+                    break
+                if i == (len(sum_p)-2) and random_pro > sum_p[i + 1]:
+                    mean_num = i + 1
+            mean[mean_id] = Gram[mean_num]
+        print(mean)
     gif_pic = []
     count = 0
     while(True):
@@ -71,9 +100,10 @@ def k_mean(Gram):
             gif_pic = np.array(gif_pic)
             break
     
-    return gif_pic, count,k
+    return gif_pic, count
 
-def make_gif(gif_pic,data_size,count,k):
+def make_gif(gif_pic,data_size,count,k,kmean_kmeanplusplus):
+    mode = kmean_kmeanplusplus
     images = []
     color = [(255,0,0),(0,255,0),(0,0,255),(255,255,0)] # r g b y
     width = data_size
@@ -82,13 +112,18 @@ def make_gif(gif_pic,data_size,count,k):
         for x in range(width):
             for y in range(width):
                 images[i].putpixel((x,y),color[gif_pic[i][x * width + y][0]])
-
-    images[0].save(f'kmeans_k-{k}.gif', format='GIF', append_images=images[1:], save_all=True, duration=100, loop=0)
-    images[count-1].save(f'kmeans_k-{k}.png')
-
+    if mode == 0:
+        images[0].save(f'kmeans_k-{k}.gif', format='GIF', append_images=images[1:], save_all=True, duration=100, loop=0)
+        images[count-1].save(f'kmeans_k-{k}.png')
+    if mode == 1:
+        images[0].save(f'k-mean++_k-{k}.gif', format='GIF', append_images=images[1:], save_all=True, duration=100, loop=0)
+        images[count-1].save(f'k-mean++_k-{k}.png')
     return
 
 if __name__ == "__main__":    
+    k_num = int(input("k = "))
+    kmean_kmeanplusplus = int(input("using k-mean(0) or k-mean++(1) : "))
+
     print("loading...")
 
     data_Color, data_Spatial, data_size = load()
@@ -99,8 +134,8 @@ if __name__ == "__main__":
 
     print("k-means...")
 
-    gif_pic ,count ,k= k_mean(Gram)
+    gif_pic ,count = k_mean(Gram,k_num,kmean_kmeanplusplus)
 
     print("making GIF...")
 
-    make_gif(gif_pic,data_size,count,k)
+    make_gif(gif_pic,data_size,count,k_num,kmean_kmeanplusplus)
