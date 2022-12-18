@@ -12,10 +12,11 @@ def load(image_num):
     data_size = data.shape[0]
     data_Color = data.reshape(-1, data.shape[2])
     # print(data_Color.shape)
-    data_Spatial = np.array([(i, j) for i in range(data.shape[0])for j in range(data.shape[1])])
+    data_Spatial = np.array([(i, j) for i in range(data.shape[0])
+                            for j in range(data.shape[1])])
     # print(data_Spatial.shape)
     return data_Color, data_Spatial, data_size
-    
+
 
 def kernel_k_means(data_Color, data_Spatial):
     s = 0.001
@@ -25,24 +26,24 @@ def kernel_k_means(data_Color, data_Spatial):
     return gram
 
 
-def k_mean(Gram,k_num,kmean_kmeanplusplus):
+def k_mean(Gram, k_num, kmean_kmeanplusplus):
     k = k_num
     mode = kmean_kmeanplusplus
-    mean = np.zeros((k,Gram.shape[0]))
+    mean = np.zeros((k, Gram.shape[0]))
     # mode = 0 k-mean
     if mode == 0:
         # select k centers of random
         center = random.sample(range(0, 10000), k)
-        center = np.array(center)   
+        center = np.array(center)
         # set the center to the mean
         for i in range(k):
             mean[i] = Gram[center[i]]
-    print(mean)
+    # print(mean)
     # mode = 1 k-mean++
     if mode == 1:
-        random_num = random.sample(range(0, 10000),1)
+        random_num = random.sample(range(0, 10000), 1)
         mean[0] = Gram[random_num]
-        for mean_id in range(1,k):
+        for mean_id in range(1, k):
             dis = []
             for i in range(Gram.shape[0]):
                 dis.append(np.linalg.norm(Gram[i] - mean[mean_id - 1]) ** 2)
@@ -51,7 +52,7 @@ def k_mean(Gram,k_num,kmean_kmeanplusplus):
             for i in range(len(dis)):
                 p_dis.append(dis[i]/dis_sum)
             sum_p = np.cumsum(p_dis)
-            random_pro = np.random.uniform(0,1)
+            random_pro = np.random.uniform(0, 1)
             mean_num = 0
             for i in range(len(sum_p)-1):
                 if random_pro < sum_p[0]:
@@ -62,22 +63,21 @@ def k_mean(Gram,k_num,kmean_kmeanplusplus):
                 if i == (len(sum_p)-2) and random_pro > sum_p[i + 1]:
                     mean_num = i + 1
             mean[mean_id] = Gram[mean_num]
-            
 
     gif_pic = []
     count = 0
-    while(True):
+    while (True):
         count += 1
         # E-step classify all samples according to closet
-        cluster = [] # select which cluster is this point
+        cluster = []  # select which cluster is this point
         for i in range(Gram.shape[0]):
-            #buffer is storing the kth euclidean norm
+            # buffer is storing the kth euclidean norm
             buffer = []
             for j in range(k):
                 buffer.append(np.linalg.norm(Gram[i] - mean[j]))
             cluster.append(np.argmin(buffer))
 
-        cluster = np.array(cluster).reshape(-1,1)  
+        cluster = np.array(cluster).reshape(-1, 1)
         pre_mean = copy.deepcopy(mean)
 
         # M-step re-compute as the mean μk of the points in cluster Ck
@@ -90,34 +90,38 @@ def k_mean(Gram,k_num,kmean_kmeanplusplus):
 
         # store the each cluster to gif_pic for making the .gif
         gif_pic.append(cluster)
-        
+
         if np.linalg.norm(mean - pre_mean) < 1e-5:
             print(count)
             gif_pic = np.array(gif_pic)
             break
-    
+
     return gif_pic, count
 
-def make_gif(gif_pic,data_size,count,k,kmean_kmeanplusplus,image_num):
+
+def make_gif(gif_pic, data_size, count, k, kmean_kmeanplusplus, image_num):
     mode = kmean_kmeanplusplus
     images = []
-    color = [(255,0,0),(0,255,0),(0,0,255),(255,255,0)] # r g b y
+    color = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)]  # r g b y
     width = data_size
     for i in range(count):
         images.append(Image.new('RGB', (width, width)))
         for x in range(width):
             for y in range(width):
-                images[i].putpixel((y,x),color[gif_pic[i][x * width + y][0]])
+                images[i].putpixel((y, x), color[gif_pic[i][x * width + y][0]])
     if mode == 0:
-        images[0].save(f'./image{image_num}_k_mean_pic/kmeans_k-{k}.gif', format='GIF', append_images=images[1:], save_all=True, duration=100, loop=0)
+        images[0].save(f'./image{image_num}_k_mean_pic/kmeans_k-{k}.gif', format='GIF',
+                       append_images=images[1:], save_all=True, duration=100, loop=0)
         images[count-1].save(f'./image{image_num}_k_mean_pic/kmeans_k-{k}.png')
     if mode == 1:
-        images[0].save(f'./image{image_num}_k_mean_pic/k-mean++_k-{k}.gif', format='GIF', append_images=images[1:], save_all=True, duration=100, loop=0)
-        images[count-1].save(f'./image{image_num}_k_mean_pic/k-mean++_k-{k}.png')
+        images[0].save(f'./image{image_num}_k_mean_pic/k-mean++_k-{k}.gif',
+                       format='GIF', append_images=images[1:], save_all=True, duration=100, loop=0)
+        images[count -
+               1].save(f'./image{image_num}_k_mean_pic/k-mean++_k-{k}.png')
     return
-    
 
-if __name__ == "__main__":    
+
+if __name__ == "__main__":
     k_num = int(input("k = "))
     kmean_kmeanplusplus = int(input("using k-mean(0) or k-mean++(1) : "))
     image_num = int(input("which image (1) or (2) : "))
@@ -131,8 +135,8 @@ if __name__ == "__main__":
 
     print("k-means...")
 
-    gif_pic ,count = k_mean(Gram,k_num,kmean_kmeanplusplus)
+    gif_pic, count = k_mean(Gram, k_num, kmean_kmeanplusplus)
 
     print("making GIF...")
 
-    make_gif(gif_pic,data_size,count,k_num,kmean_kmeanplusplus,image_num)
+    make_gif(gif_pic, data_size, count, k_num, kmean_kmeanplusplus, image_num)
