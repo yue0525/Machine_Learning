@@ -1,350 +1,247 @@
-import argparse
-import matplotlib.pyplot as plt
 import numpy as np
-import os
 from PIL import Image
-from scipy.spatial.distance import cdist
-import string
+import os, re, sys
+import scipy.spatial.distance
+from datetime import datetime
+import matplotlib.pyplot as plt
 
-imageDirectory: string = '.'
+# SHAPE = (195, 231)
+# SHAPE = (60, 60)
+SHAPE = (21, 15)
 
+K = [1, 3, 5, 7, 9, 11]
+kernels = ['linear kernel', 'polynomial kernel', 'rbf kernel']
 
-# Set up the input parameters, and return args.
-def parseArguments():
-    parse = argparse.ArgumentParser()
+def readPGM(filename):
+    image = Image.open(filename)
+    image = image.resize(SHAPE, Image.ANTIALIAS)
+    image = np.array(image)
+    label = int(re.findall(r'subject(\d+)', filename)[0])
+    return [image.ravel().astype(np.float64), label]
 
-    # The algorithm will be used, 0 -> PCA, 1-> LDA.
-    parse.add_argument('--algo', default=0)
-    # Mode of PCA and LDA, 0 -> simple, 1 -> kernel.
-    parse.add_argument('--mode', default=0)
-    # The number of nearest neighbors used for classification.
-    parse.add_argument('--numOfNeighbors', default=5)
-    # The kernel type, 0 -> linear, 1 -> RBF.
-    parse.add_argument('--kernelType', default=0)
-    # The gamma of RBF kernel.
-    parse.add_argument('--gamma', default=0.000001)
+def readData(path):            
+    data = []
+    filename = []
+    label = []
+    for pgm in os.listdir(path):
+        res = readPGM(f'{path}/{pgm}')
+        data.append(res[0])
+        filename.append(pgm)
+        label.append(res[1])
+    return [np.asarray(data), np.asarray(filename), np.asarray(label)]
 
-    return parse.parse_args()
+def PCA(X, dims):
+    mu = np.mean(X, axis=0)
+    cov = (X - mu) @ (X - mu).T
+    eigen_val, eigen_vec = np.linalg.eigh(cov)
+    eigen_vec = (X - mu).T @ eigen_vec
+    for i in range(eigen_vec.shape[1]):
+        eigen_vec[:, i] = eigen_vec[:, i] / np.linalg.norm(eigen_vec[:, i])
+    idx = np.argsort(eigen_val)[::-1]
+    W = eigen_vec[:, idx][:, :dims].real
+    return [W, mu]
 
+def LDA(X, label, dims):
+    (n, d) = X.shape
+    label = np.asarray(label)
+    c = np.unique(label)
+    mu = np.mean(X, axis=0)
+    S_w = np.zeros((d, d), dtype=np.float64)
+    S_b = np.zeros((d, d), dtype=np.float64)
+    for i in c:
+        X_i = X[np.where(label == i)[0], :]
+        mu_i = np.mean(X_i, axis=0)
+        S_w += (X_i - mu_i).T @ (X_i - mu_i)
+        S_b += X_i.shape[0] * ((mu_i - mu).T @ (mu_i - mu))
+    eigen_val, eigen_vec = np.linalg.eig(np.linalg.pinv(S_w) @ S_b)
+    for i in range(eigen_vec.shape[1]):
+        eigen_vec[:, i] = eigen_vec[:, i] / np.linalg.norm(eigen_vec[:, i])
+    idx = np.argsort(eigen_val)[::-1]
+    W = eigen_vec[:, idx][:, :dims].real
+    return W
 
-def readTrainingImages():
-    trainingImages, trainingLabels = None, None
-    numOfImages = 0
+# def PCALDA(X, label, dims):
+#     label = np.asarray(label)
+#     (n, d) = X.shape
+#     c = len(np.unique(label))
+#     [eigen_vec_pca, mu_pca] = PCA(X, n - c)
+#     projection = (X - mu_pca) @ eigen_vec_pca
+#     eigen_vec_lda = LDA(projection, label, dims)
+#     eigen_vec = eigen_vec_pca @ eigen_vec_lda
+#     return [eigen_vec, mu_pca]
 
-    # Get the number of images first.
-    with os.scandir(f'{imageDirectory}/Training') as directory:
-        # Get number of files
-        numOfImages = len([file for file in directory if file.is_file()])
+def linearKernel(X):
+    return X @ X.T
 
-    # Read the files.
-    with os.scandir(f'{imageDirectory}/Training') as directory:
-        trainingLabels = np.zeros(numOfImages, dtype=int)
-        # Images will be resized to 29 * 24.
-        trainingImages = np.zeros((numOfImages, 29 * 24))
+def polynomialKernel(X, gamma, coef, degree):
+    return np.power(gamma * (X @ X.T) + coef, degree)
 
-        for index, file in enumerate(directory):
-            if file.path.endswith('.pgm') and file.is_file():
-                face = np.asarray(Image.open(file.path).resize((24, 29))).reshape(1, -1)
-                trainingImages[index, :] = face
-                trainingLabels[index] = int(file.name[7:9])
+def rbfKernel(X, gamma):
+    return np.exp(-gamma * scipy.spatial.distance.cdist(X, X, 'sqeuclidean'))
 
-    return trainingImages, trainingLabels
-
-
-def readTestingImages():
-    testingImages, testingLabels = None, None
-    numOfImages = 0
-
-    # Get the number of images first.
-    with os.scandir(f'{imageDirectory}/Testing') as directory:
-        # Get number of files
-        numOfImages = len([file for file in directory if file.is_file()])
-
-    # Read the files.
-    with os.scandir(f'{imageDirectory}/Testing') as directory:
-        testingLabels = np.zeros(numOfImages, dtype=int)
-        # Images will be resized to 29 * 24.
-        testingImages = np.zeros((numOfImages, 29 * 24))
-
-        for index, file in enumerate(directory):
-            if file.path.endswith('.pgm') and file.is_file():
-                face = np.asarray(Image.open(file.path).resize((24, 29))).reshape(1, -1)
-                testingImages[index, :] = face
-                testingLabels[index] = int(file.name[7:9])
-
-    return testingImages, testingLabels
-
-
-def simplePCA(numOfTrainingImages, trainingImages):
-    # Compute covariance
-    trainingImagesTransposed = trainingImages.T
-    mean = np.mean(trainingImagesTransposed, axis=1)
-    mean = np.tile(mean.T, (numOfTrainingImages, 1)).T
-    difference = trainingImagesTransposed - mean
-    covariance = difference.dot(difference.T) / numOfTrainingImages
-    print(covariance.shape)
-    return covariance
-
-
-def kernelPCA(trainingImages, kernelType, gamma):
-    # Compute kernel.
-    # Linear
-    if kernelType == 0:
-        kernel = trainingImages.T.dot(trainingImages)
-    # RBF
+def getKernel(X, kernel_type):
+    if kernel_type == 1:
+        kernel = linearKernel(X)
+    elif kernel_type == 2:
+        kernel = polynomialKernel(X, 5, 10, 2)
     else:
-        kernel = np.exp(-gamma * cdist(trainingImages.T, trainingImages.T, 'sqeuclidean'))
+        kernel = rbfKernel(X, 1e-7)
+    return kernel
 
-    # Get centered kernel.
-    matrixN = np.ones((29 * 24, 29 * 24), dtype=float) / (29 * 24)
-    matrix = kernel - matrixN.dot(kernel) - kernel.dot(matrixN) + matrixN.dot(kernel).dot(matrixN)
+def kernelPCA(X, dims, kernel_type):
+    kernel = getKernel(X, kernel_type)
+    n = kernel.shape[0]
+    one = np.ones((n, n), dtype=np.float64) / n
+    kernel = kernel - one @ kernel - kernel @ one + one @ kernel @ one
+    eigen_val, eigen_vec = np.linalg.eigh(kernel)
+    for i in range(eigen_vec.shape[1]):
+        eigen_vec[:, i] = eigen_vec[:, i] / np.linalg.norm(eigen_vec[:, i])
+    idx = np.argsort(eigen_val)[::-1]
+    W = eigen_vec[:, idx][:, :dims].real
+    return kernel @ W
 
-    return matrix
+# def kernelLDA(X, label, dims, kernel_type):
+#     label = np.asarray(label)
+#     c = np.unique(label)
+#     kernel = getKernel(X, kernel_type)
+#     n = kernel.shape[0]
+#     mu = np.mean(kernel, axis=0)
+#     N = np.zeros((n, n), dtype=np.float64)
+#     M = np.zeros((n, n), dtype=np.float64)
+#     for i in c:
+#         K_i = kernel[np.where(label == i)[0], :]
+#         l = K_i.shape[0]
+#         mu_i = np.mean(K_i, axis=0)
+#         N += K_i.T @ (np.eye(l) - (np.ones((l, l), dtype=np.float64) / l)) @ K_i
+#         M += l * ((mu_i - mu).T @ (mu_i - mu))
+#     eigen_val, eigen_vec = np.linalg.eig(np.linalg.pinv(N) @ M)
+#     for i in range(eigen_vec.shape[1]):
+#         eigen_vec[:, i] = eigen_vec[:, i] / np.linalg.norm(eigen_vec[:, i])
+#     idx = np.argsort(eigen_val)[::-1]
+#     W = eigen_vec[:, idx][:, :dims].real
+#     return kernel @ W
 
+def draw(target_data, target_filename, title, W, mu=None):
+    if mu is None:
+        mu = np.zeros(target_data.shape[1])
+    projection = (target_data - mu) @ W
+    reconstruction = projection @ W.T + mu
+    folder = f"{title}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    os.mkdir(folder)
+    os.mkdir(f'{folder}/{title}')
+    if W.shape[1] == 25:
+        plt.clf()
+        for i in range(5):
+            for j in range(5):
+                idx = i * 5 + j
+                plt.subplot(5, 5, idx + 1)
+                plt.imshow(W[:, idx].reshape(SHAPE[::-1]), cmap='gray')
+                plt.axis('off')
+        plt.savefig(f'./{folder}/{title}/{title}.png')
+    for i in range(W.shape[1]):
+        plt.clf()
+        plt.title(f'{title}_{i + 1}')
+        plt.imshow(W[:, i].reshape(SHAPE[::-1]), cmap='gray')
+        plt.savefig(f'./{folder}/{title}/{title}_{i + 1}.png')
+    
+    if reconstruction.shape[0] == 10:
+        plt.clf()
+        for i in range(2):
+            for j in range(5):
+                idx = i * 5 + j
+                plt.subplot(2, 5, idx + 1)
+                plt.imshow(reconstruction[idx].reshape(SHAPE[::-1]), cmap='gray')
+                plt.axis('off')
+        plt.savefig(f'./{folder}/reconstruction.png')
+    for i in range(reconstruction.shape[0]):
+        plt.clf()
+        plt.title(target_filename[i])
+        plt.imshow(reconstruction[i].reshape(SHAPE[::-1]), cmap='gray')
+        plt.savefig(f'./{folder}/{target_filename[i]}.png')
 
-def findTargetEigenvectors(matrix):
-    # Compute eigenvalues and eigenvectors.
-    eigenvalues, eigenvectors = np.linalg.eig(matrix)
+def distance(vec1, vec2):
+    return np.sum((vec1 - vec2) ** 2)
 
-    # Get 25 first largest eigenvectors.
-    targetIndex = np.argsort(eigenvalues)[::-1][:25]
-    targetEigenvectors = eigenvectors[:, targetIndex].real
-    # print(targetEigenvectors.shape)
-    return targetEigenvectors
-
-
-# Transform eigenvectors into eigenfaces/fisherfaces.
-# algo parameter means the algorithm been used, 0 -> PCA, 1-> LDA.
-def transformEigenvectorsToFaces(targetEigenvectors, algo):
-    faces = targetEigenvectors.T.reshape((25, 29, 24))
-    fig = plt.figure(1)
-    fig.canvas.set_window_title(f'{"Eigenfaces" if algo == 0 else "Fisherfaces"}')
-
-    for idx in range(25):
-        plt.subplot(5, 5, idx + 1)
-        plt.axis('off')
-        plt.imshow(faces[idx, :, :], cmap='gray')
-
-
-# Reconstruct the faces from eigenfaces and fisherfaces.
-def reconstructFaces(numOfTrainingImages, trainingImages, targetEigenvectors):
-    reconstructedImages = np.zeros((10, 29 * 24))
-    choice = np.random.choice(numOfTrainingImages, 10)
-
-    for index in range(10):
-        reconstructedImages[index, :] = trainingImages[choice[index], :].dot(targetEigenvectors).dot(
-            targetEigenvectors.T)
-
-    fig = plt.figure(2)
-    fig.canvas.set_window_title('Reconstructed faces')
-
-    for index in range(10):
-        # Original image.
-        plt.subplot(10, 2, index * 2 + 1)
-        plt.axis('off')
-        plt.imshow(trainingImages[choice[index], :].reshape((29, 24)), cmap='gray')
-
-        # Reconstructed image.
-        plt.subplot(10, 2, index * 2 + 2)
-        plt.axis('off')
-        plt.imshow(reconstructedImages[index, :].reshape((29, 24)), cmap='gray')
-
-
-# Decorrelate original images into components space.
-def decorrelate(numOfImages, images, eigenvectors):
-    decorrelatedImages = np.zeros((numOfImages, 25))
-
-    for index, image in enumerate(images):
-        decorrelatedImages[index, :] = image.dot(eigenvectors)
-
-    return decorrelatedImages
-
-
-# Classify and show predict result.
-def classifyAndPredict(numOfTrainingImages, numOfTestingImages, trainingImages, trainingLabels, testingImages,
-                       testingLabels,
-                       targetEigenvectors, numOfNeighbors):
-    decorrelatedTraining = decorrelate(numOfTrainingImages, trainingImages, targetEigenvectors)
-    decorrelatedTesting = decorrelate(numOfTestingImages, testingImages, targetEigenvectors)
-    error = 0
-    distance = np.zeros(numOfTrainingImages)
-
-    for testIndex, test in enumerate(decorrelatedTesting):
-        for trainIndex, train in enumerate(decorrelatedTraining):
-            distance[trainIndex] = np.linalg.norm(test - train)
-
-        minDistances = np.argsort(distance)[:numOfNeighbors]
-        predict = np.argmax(np.bincount(trainingLabels[minDistances]))
-
-        if predict != testingLabels[testIndex]:
-            error += 1
-    print(f'Error count: {error}\nError rate: {float(error) / numOfTestingImages}')
-
-
-def outputDiagram():
-    # Plot
-    plt.tight_layout()
-    plt.show()
-
-
-# Principal components analysis.
-def PCA(mode, numOfNeighbors, kernelType, gamma, trainingImages, trainingLabels, testingImages, testingLabels):
-    # Get the number of training images.
-    numOfTrainingImages = len(trainingImages)
-    numOfTestingImages = len(testingImages)
-
-    # Simple PCA
-    if mode == 0:
-        matrix = simplePCA(numOfTrainingImages, trainingImages)
-    # Kernel PCA
+def faceRecognition(X, X_label, test, test_label, method, kernel_type=None):
+    if kernel_type is None:
+        print(f'Face recognition with {method} and KNN:')
     else:
-        matrix = kernelPCA(trainingImages, kernelType, gamma)
-
-    # Find the first 25 largest eigenvectors.
-    targetEigenvectors = findTargetEigenvectors(matrix)
-
-    # Transform eigenvectors into eigenfaces.
-    transformEigenvectorsToFaces(targetEigenvectors, 0)
-
-    # Randomly reconstruct 10 eigenfaces.
-    reconstructFaces(numOfTrainingImages, trainingImages, targetEigenvectors)
-
-    # Classify and predict.
-    classifyAndPredict(numOfTrainingImages, numOfTestingImages, trainingImages, trainingLabels, testingImages,
-                       testingLabels, targetEigenvectors, numOfNeighbors)
-
-    # Output the diagram.
-    outputDiagram()
-
-
-def simpleLDA(numOfEachClass, trainingImages, trainingLabels):
-    # Compute the overall mean.
-    overallMean = np.mean(trainingImages, axis=0)
-
-    # Get mean of each class.
-    numOfClasses = len(numOfEachClass)
-    classMean = np.zeros((numOfClasses, 29 * 24))
-
-    for label in range(numOfClasses):
-        classMean[label, :] = np.mean(trainingImages[trainingLabels == label + 1], axis=0)
-
-    # Compute between-class scatter.
-    scatterB = np.zeros((29 * 24, 29 * 24), dtype=float)
-
-    for idx, num in enumerate(numOfEachClass):
-        difference = (classMean[idx] - overallMean).reshape((29 * 24, 1))
-        scatterB += num * difference.dot(difference.T)
-
-    # Compute within-class scatter.
-    scatterW = np.zeros((29 * 24, 29 * 24), dtype=float)
-    for idx, mean in enumerate(classMean):
-        difference = trainingImages[trainingLabels == idx + 1] - mean
-        scatterW += difference.T.dot(difference)
-
-    # Compute Sw^(-1) * Sb.
-    matrix = np.linalg.pinv(scatterW).dot(scatterB)
-
-    return matrix
-
-
-def kernelLDA(numOfEachClass, trainingImages, trainingLabels, kernelType, gamma):
-    # Compute kernel.
-    numOfClasses = len(numOfEachClass)
-    numOfImages = len(trainingImages)
-
-    if not kernelType:
-        # Linear
-        kernelOfEachClass = np.zeros((numOfClasses, 29 * 24, 29 * 24))
-        for idx in range(numOfClasses):
-            images = trainingImages[trainingLabels == idx + 1]
-            kernelOfEachClass[idx] = images.T.dot(images)
-        kernelOfAll = trainingImages.T.dot(trainingImages)
-    else:
-        # RBF
-        kernelOfEachClass = np.zeros((numOfClasses, 29 * 24, 29 * 24))
-        for idx in range(numOfClasses):
-            images = trainingImages[trainingLabels == idx + 1]
-            kernelOfEachClass[idx] = np.exp(-gamma * cdist(images.T, images.T, 'sqeuclidean'))
-        kernelOfAll = np.exp(-gamma * cdist(trainingImages.T, trainingImages.T, 'sqeuclidean'))
-
-    # Compute N.
-    matrixN = np.zeros((29 * 24, 29 * 24))
-    identityMatrix = np.eye(29 * 24)
-
-    for index, num in enumerate(numOfEachClass):
-        matrixN += kernelOfEachClass[index].dot(identityMatrix - num * identityMatrix).dot(
-            kernelOfEachClass[idx].T)
-
-    # Compute M.
-    matrixMI = np.zeros((numOfClasses, 29 * 24))
-
-    for index, kernel in enumerate(kernelOfEachClass):
-        for rowIndex, row in enumerate(kernel):
-            matrixMI[index, rowIndex] = np.sum(row) / numOfEachClass[idx]
-    matrixMStar = np.zeros(29 * 24)
-    for index, row in enumerate(kernelOfAll):
-        matrixMStar[index] = np.sum(row) / numOfImages
-    matrixM = np.zeros((29 * 24, 29 * 24))
-    for idx, num in enumerate(numOfEachClass):
-        difference = (matrixMI[idx] - matrixMStar).reshape((29 * 24, 1))
-        matrixM += num * difference.dot(difference.T)
-
-    # Get N^(-1) * M.
-    matrix = np.linalg.pinv(matrixN).dot(matrixM)
-
-    return matrix
-
-
-# Linear discriminative analysis.
-def LDA(mode, numOfNeighbors, kernelType, gamma, trainingImages, trainingLabels, testingImages, testingLabels):
-    # Get number of each class and the number of training images.
-    _, numOfEachClass = np.unique(trainingLabels, return_counts=True)
-    numOfTrainingImages = len(trainingImages)
-    numOfTestingImages = len(testingImages)
-
-    # Simple LDA
-    if not mode:
-        matrix = simpleLDA(numOfEachClass, trainingImages, trainingLabels)
-    # Kernel LDA
-    else:
-        matrix = kernelLDA(numOfEachClass, trainingImages, trainingLabels, kernelType, gamma)
-
-    # Find the first 25 largest eigenvectors.
-    targetEigenvectors = findTargetEigenvectors(matrix)
-
-    # Transform eigenvectors into eigenfaces.
-    transformEigenvectorsToFaces(targetEigenvectors, 1)
-
-    # Randomly reconstruct 10 eigenfaces.
-    reconstructFaces(numOfTrainingImages, trainingImages, targetEigenvectors)
-
-    # Classify and predict.
-    classifyAndPredict(numOfTrainingImages, numOfTestingImages, trainingImages, trainingLabels, testingImages,
-                       testingLabels, targetEigenvectors, numOfNeighbors)
-
-    # Output the diagram.
-    outputDiagram()
-
-
-def main():
-    args = parseArguments()
-    # Get parameters.
-    algo = int(args.algo)
-    mode = int(args.mode)
-    numOfNeighbors = int(args.numOfNeighbors)
-    kernelType = int(args.kernelType)
-    gamma = float(args.gamma)
-
-    trainingImages, trainingLabels = readTrainingImages()
-    testingImages, testingLabels = readTestingImages()
-    print(trainingImages.shape)
-    # PCA
-    if algo == 0:
-        PCA(mode, numOfNeighbors, kernelType, gamma, trainingImages, trainingLabels, testingImages, testingLabels)
-    # LDA
-    else:
-        LDA(mode, numOfNeighbors, kernelType, gamma, trainingImages, trainingLabels, testingImages, testingLabels)
-
+        print(f'Face recognition with Kernel {method}({kernels[kernel_type - 1]}) and KNN:')
+    dist_mat = []
+    for i in range(test.shape[0]):
+        dist = []
+        for j in range(X.shape[0]):
+            dist.append((distance(X[j], test[i]), X_label[j]))
+        dist.sort(key=lambda x: x[0])
+        dist_mat.append(dist)
+    for k in K:
+        correct = 0
+        total = test.shape[0]
+        for i in range(test.shape[0]):
+            dist = dist_mat[i]
+            neighbor = np.asarray([x[1] for x in dist[:k]])
+            neighbor, count = np.unique(neighbor, return_counts=True)
+            predict = neighbor[np.argmax(count)]
+            if predict == test_label[i]:
+                correct += 1
+        print(f'K={k:>2}, accuracy: {correct / total:>.3f} ({correct}/{total})')
+    print()
 
 if __name__ == '__main__':
-    main()
+    START = datetime.now()
+    
+    # if len(sys.argv) < 2:
+    #     print('Please choose a task:')
+    #     print('1) PCA eiganfaces, LDA fisherfaces')
+    #     print('2) face recognition')
+    #     print('3) kernel PCA, kernel LDA')
+    #     print('Usage: python3 ./HW7_1.py {1|2|3}')
+    TASK = input("number")
+    # TASK = sys.argv[1]
+    X, X_filename, X_label = readData('./Yale_Face_Database/Training')
+    test, test_filename, test_label = readData('./Yale_Face_Database/Testing')
+    data = np.vstack((X, test))
+    filename = np.hstack((X_filename, test_filename))
+    label = np.hstack((X_label, test_label))
+    if TASK == '1':
+        target_idx = np.random.choice(data.shape[0], 10)
+        target_data = data[target_idx]
+        target_filename = filename[target_idx]
+
+        print('Compute eigenfaces...')
+        W, mu = PCA(data, 25)
+        draw(target_data, target_filename, 'pca_eigenface', W, mu)
+
+        print('Compute fisherfaces...')
+        W = LDA(data, label, 25)
+        draw(target_data, target_filename, 'lda_fisherface', W)
+
+    elif TASK == '2':
+        W, mu = PCA(data, 25)
+        X_proj = (X - mu) @ W
+        test_proj = (test - mu) @ W
+        faceRecognition(X_proj, X_label, test_proj, test_label, 'PCA')
+
+        W = LDA(data, label, 25)
+        X_proj = X @ W
+        test_proj = test @ W
+        faceRecognition(X_proj, X_label, test_proj, test_label, 'LDA')
+
+    elif TASK == '3':
+        kernel_type = int(input('1) Linear kernel\n2) Polynomial kernel\n3) RBF kernel\nChoose a kernel: '))
+        
+        new_coor = kernelPCA(data, 25, kernel_type)
+        new_X = new_coor[:X.shape[0], :]
+        new_test = new_coor[X.shape[0]:, :]
+        faceRecognition(new_X, X_label, new_test, test_label, 'PCA', kernel_type)
+
+        print('KernelLDA not implemented')
+        # new_coor = kernelLDA(data, label, 25, kernel_type)
+        # new_X = new_coor[:X.shape[0]]
+        # new_test = new_coor[X.shape[0]:]
+        # faceRecognition(new_X, X_label, new_test, test_label, 'LDA', kernel_type)
+
+    else:
+        print('Unknown task')
+
+    print(f'time: {datetime.now() - START}')
