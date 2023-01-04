@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 # SHAPE = (195, 231)
 # SHAPE = (60, 60)
-SHAPE = (21, 15)
+SHAPE = (50, 50)
 
 K = [1, 3, 5, 7, 9, 11]
 kernels = ['linear kernel', 'polynomial kernel', 'rbf kernel']
@@ -189,15 +189,15 @@ def faceRecognition(X, X_label, test, test_label, method, kernel_type=None):
 
 if __name__ == '__main__':
     START = datetime.now()
-    
+    TASK = input("number ")
     # if len(sys.argv) < 2:
     #     print('Please choose a task:')
     #     print('1) PCA eiganfaces, LDA fisherfaces')
     #     print('2) face recognition')
     #     print('3) kernel PCA, kernel LDA')
     #     print('Usage: python3 ./HW7_1.py {1|2|3}')
-    TASK = input("number")
-    # TASK = sys.argv[1]
+    # else:
+        # TASK = sys.argv[1]
     X, X_filename, X_label = readData('./Yale_Face_Database/Training')
     test, test_filename, test_label = readData('./Yale_Face_Database/Testing')
     data = np.vstack((X, test))
@@ -241,7 +241,7 @@ if __name__ == '__main__':
         # new_test = new_coor[X.shape[0]:]
         # faceRecognition(new_X, X_label, new_test, test_label, 'LDA', kernel_type)
 
-    else:
-        print('Unknown task')
+        # else:
+        #     print('Unknown task')
 
     print(f'time: {datetime.now() - START}')
